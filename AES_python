@@ -1,0 +1,74 @@
+def pad_pkcs7(data):
+    pad_len = 16 - (len(data) % 16)
+    return data + bytes([pad_len] * pad_len)
+
+def unpad_pkcs7(data):
+    pad_len = data[-1]
+    if pad_len < 1 or pad_len > 16:
+        raise ValueError("Invalid padding")
+    if data[-pad_len:] != bytes([pad_len] * pad_len):
+        raise ValueError("Incorrect padding")
+    return data[:-pad_len]
+
+def aes_encrypt_ecb(data, key):
+    padded = pad_pkcs7(data)
+    blocks = [padded[i:i+16] for i in range(0, len(padded), 16)]
+    return b''.join([aes_encrypt_block(block, key) for block in blocks])
+
+def aes_decrypt_block(block, key):
+    state = list(block)
+    round_keys = key_expansion(key)
+    state = add_round_key(state, round_keys[10])
+    for r in range(9, 0, -1):
+        state = inv_shift_rows(state)
+        state = inv_sub_bytes(state)
+        state = add_round_key(state, round_keys[r])
+        state = inv_mix_columns(state)
+    state = inv_shift_rows(state)
+    state = inv_sub_bytes(state)
+    state = add_round_key(state, round_keys[0])
+    return bytes(state)
+
+def aes_decrypt_ecb(ciphertext, key):
+    if len(ciphertext) % 16 != 0:
+        raise ValueError("Ciphertext must be a multiple of 16 bytes")
+    blocks = [ciphertext[i:i+16] for i in range(0, len(ciphertext), 16)]
+    decrypted = b''.join([aes_decrypt_block(block, key) for block in blocks])
+    return unpad_pkcs7(decrypted)
+
+inv_s_box = [0] * 256
+for i in range(256):
+    inv_s_box[s_box[i]] = i
+
+def inv_sub_bytes(state):
+    return [inv_s_box[b] for b in state]
+
+def inv_shift_rows(state):
+    return [
+        state[0],  state[13], state[10], state[7],
+        state[4],  state[1],  state[14], state[11],
+        state[8],  state[5],  state[2],  state[15],
+        state[12], state[9],  state[6],  state[3],
+    ]
+
+def inv_mix_columns(state):
+    for i in range(4):
+        col = state[i::4]
+        u = xtime(xtime(col[0] ^ col[2]))
+        v = xtime(xtime(col[1] ^ col[3]))
+        col[0] ^= u
+        col[1] ^= v
+        col[2] ^= u
+        col[3] ^= v
+        mix_single_column(col)
+        for j in range(4):
+            state[i + j*4] = col[j]
+    return state
+key = b'2b7e151628aed2a6abf7158809cf4f3c'
+message = b'6bc1bee22e409f96e93d7e117393172a'
+
+ciphertext = aes_encrypt_ecb(message, key)
+print("Encrypted (hex):", ciphertext.hex())
+
+decrypted = aes_decrypt_ecb(ciphertext, key)
+print("Decrypted:", decrypted.decode())
